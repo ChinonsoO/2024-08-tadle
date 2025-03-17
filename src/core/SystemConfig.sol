@@ -13,6 +13,8 @@ import {Errors} from "../utils/Errors.sol";
  * @dev Contract of SystemConfig.
  * @dev Contains markets setting, referral setting, etc.
  */
+
+//q- Are the neccesary functions not able to accessed when we pause.
 contract SystemConfig is SystemConfigStorage, Rescuable, ISystemConfig {
     constructor() Rescuable() {}
 
@@ -41,7 +43,7 @@ contract SystemConfig is SystemConfigStorage, Rescuable, ISystemConfig {
     function updateReferrerInfo(
         address _referrer,
         uint256 _referrerRate,
-        uint256 _authorityRate
+        uint256 _authorityRate //q- What is the authority rate?
     ) external {
         if (_msgSender() == _referrer) {
             revert InvalidReferrer(_referrer);
@@ -50,7 +52,8 @@ contract SystemConfig is SystemConfigStorage, Rescuable, ISystemConfig {
         if (_referrer == address(0x0)) {
             revert Errors.ZeroAddress();
         }
-
+        
+        //q- Shouldn't this be the other way around, because our max rate is 30% according to the docs?
         if (_referrerRate < baseReferralRate) {
             revert InvalidReferrerRate(_referrerRate);
         }
@@ -58,6 +61,7 @@ contract SystemConfig is SystemConfigStorage, Rescuable, ISystemConfig {
         uint256 referralExtraRate = referralExtraRateMap[_referrer];
         uint256 totalRate = baseReferralRate + referralExtraRate;
 
+        //q- Have we made sure to scale these values?
         if (totalRate > Constants.REFERRAL_RATE_DECIMAL_SCALER) {
             revert InvalidTotalRate(totalRate);
         }
@@ -99,9 +103,11 @@ contract SystemConfig is SystemConfigStorage, Rescuable, ISystemConfig {
         ];
 
         if (marketPlaceInfo.status != MarketPlaceStatus.UnInitialized) {
+            //This means our market place is not unique
             revert MarketPlaceAlreadyInitialized();
         }
 
+        //q- woah, when does our marketPlace reach the uninitialized state then?. How do we make it the default state?
         marketPlaceInfo.status = MarketPlaceStatus.Online;
         marketPlaceInfo.fixedratio = _fixedratio;
 
@@ -117,6 +123,8 @@ contract SystemConfig is SystemConfigStorage, Rescuable, ISystemConfig {
      * @param _settlementPeriod Settlement period
      * @notice Caller must be owner
      */
+
+     //q- This doesn't check if the settlement TIme has passed?
     function updateMarket(
         string calldata _marketPlaceName,
         address _tokenAddress,
@@ -181,6 +189,7 @@ contract SystemConfig is SystemConfigStorage, Rescuable, ISystemConfig {
         uint256 _platformFeeRate
     ) external onlyOwner {
         require(
+            //Here we check if our platformFeeRate <= PLATFORM_FEE_SCALER, but in our above functions we check if totalRate > REFERRAL FEE SCALER
             _platformFeeRate <= Constants.PLATFORM_FEE_DECIMAL_SCALER,
             "Invalid platform fee rate"
         );

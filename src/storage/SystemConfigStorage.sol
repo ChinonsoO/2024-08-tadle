@@ -25,7 +25,7 @@ contract SystemConfigStorage is UpgradeableStorage {
     /// @dev user referral extra rate
     /// @notice baseReferralRate + extraReferralRate = referrerRate + authorReferralRate
     /// @dev referrerRate is the reward given to referrer
-    /// @dev authorReferralRate is the reward given to trader
+    /// @dev authorReferralRate is the reward given to trader //q- why are we giving a reward to trader?
     mapping(address => uint256) public referralExtraRateMap;
 
     /// @dev user refferral info, detail see ReferralInfo.

@@ -37,10 +37,12 @@ library MarketPlaceLibraries {
             return MarketPlaceStatus.BidSettling;
         }
 
+        //hmmm if blockTimestamp == tge + settlement period we return AskSettiling phase still.
         if (_blockTimestamp > _marketPlaceInfo.tge) {
             return MarketPlaceStatus.AskSettling;
         }
 
+        //q- We return the current status 
         return _marketPlaceInfo.status;
     }
 

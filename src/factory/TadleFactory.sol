@@ -14,6 +14,8 @@ import {UpgradeableProxy} from "../proxy/UpgradeableProxy.sol";
  * @notice This contrct serves as the factory of Tadle.
  * @notice guardian address in constructor is a msig.
  */
+
+//q- I'm assuming a factory is a market place.
 contract TadleFactory is Context, ITadleFactory {
     using Address for address;
 
@@ -28,6 +30,7 @@ contract TadleFactory is Context, ITadleFactory {
      *      4 => CapitalPool
      *      5 => TokenManager
      */
+     //q- Is this saying we want it to be guaranteed that these mappings are the case?
     mapping(uint8 => address) public relatedContracts;
 
     modifier onlyGuardian() {
@@ -59,6 +62,8 @@ contract TadleFactory is Context, ITadleFactory {
         }
 
         /// @dev deploy proxy
+
+        //q- With upgradable proxies we must have AuthorizeUpgragde in all our contracts is this the case?
         UpgradeableProxy _proxy = new UpgradeableProxy(
             _logic,
             guardian,

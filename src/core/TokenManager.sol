@@ -64,6 +64,7 @@ contract TokenManager is
         onlyRelatedContracts(tadleFactory, _msgSender())
         onlyInTokenWhiteList(_isPointToken, _tokenAddress)
     {
+        //q- It seems like we can just bypass our tokeWhitelist by saying our token is a pointToken where is this even used?
         /// @notice return if amount is 0
         if (_amount == 0) {
             return;
@@ -84,6 +85,7 @@ contract TokenManager is
              * @dev wrap native token and transfer to capital pool
              */
             if (msg.value < _amount) {
+                //q- We don't check if msg.value is > amount
                 revert Errors.NotEnoughMsgValue(msg.value, _amount);
             }
             IWrappedNativeToken(wrappedNativeToken).deposit{value: _amount}();
@@ -92,7 +94,7 @@ contract TokenManager is
             /// @notice token is ERC20 token
             _transfer(
                 _tokenAddress,
-                _accountAddress,
+                _accountAddress, //why not just msg.sender
                 capitalPoolAddr,
                 _amount,
                 capitalPoolAddr
@@ -251,7 +253,8 @@ contract TokenManager is
 
         uint256 fromBalanceAft = IERC20(_token).balanceOf(_from);
         uint256 toBalanceAft = IERC20(_token).balanceOf(_to);
-
+        
+        //q-To prevent fee on transfer ERC20's, but I don't ususally fee a check on the from balance?
         if (fromBalanceAft != fromBalanceBef - _amount) {
             revert TransferFailed();
         }

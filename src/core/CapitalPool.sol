@@ -10,6 +10,8 @@ import {Rescuable} from "../utils/Rescuable.sol";
  * @title CapitalPool
  * @notice Implement the capital pool
  */
+
+//q-I'm assuming this is someking of pool of money?
 contract CapitalPool is CapitalPoolStorage, Rescuable, ICapitalPool {
     bytes4 private constant APPROVE_SELECTOR =
         bytes4(keccak256(bytes("approve(address,uint256)")));

@@ -141,7 +141,7 @@ struct MarketPlaceInfo {
     MarketPlaceStatus status;
     address tokenAddress;
     uint256 tokenPerPoint;
-    uint256 tge;
+    uint256 tge; //q- What is TGE, Token generation Even?
     uint256 settlementPeriod;
 }
 
