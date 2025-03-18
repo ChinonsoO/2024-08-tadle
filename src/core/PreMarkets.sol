@@ -173,6 +173,7 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
 
         OfferInfo storage offerInfo = offerInfoMap[_offer];
         MakerInfo storage makerInfo = makerInfoMap[offerInfo.maker];
+        //@audit - We don't update our offerStatus to ongoing /filled.
         if (offerInfo.offerStatus != OfferStatus.Virgin) {
             revert InvalidOfferStatus();
         }
@@ -210,8 +211,8 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
 
         /// @dev Transfer token from user to capital pool as collateral
         uint256 depositAmount = _points.mulDiv(
-            offerInfo.amount,
-            offerInfo.points,
+            offerInfo.amount, //pretty much the price
+            offerInfo.points, //Points we're selling
             Math.Rounding.Ceil
         );
         uint256 platformFee = depositAmount.mulDiv(
@@ -239,15 +240,15 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
         stockInfoMap[stockAddr] = StockInfo({
             id: offerId,
             stockStatus: StockStatus.Initialized,
-            stockType: offerInfo.offerType == OfferType.Ask
+            stockType: offerInfo.offerType == OfferType.Ask //if someone is selling, that means we had to buy it
                 ? StockType.Bid
                 : StockType.Ask,
-            authority: _msgSender(),
+            authority: _msgSender(), //ok so our authority is the person who is buying the stock
             maker: offerInfo.maker,
             preOffer: _offer,
-            points: _points,
-            amount: depositAmount,
-            offer: address(0x0)
+            points: _points, //stock worth
+            amount: depositAmount, //how much we bought or sold our stock for
+            offer: address(0x0) //q- Is this is case we want to relist it later?
         });
 
         offerId = offerId + 1;
@@ -334,16 +335,20 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
         /// @dev change abort offer status when offer settle type is turbo
         if (makerInfo.offerSettleType == OfferSettleType.Turbo) {
             address originOffer = makerInfo.originOffer;
+            //@audit - We're not writing to storage here when we should be
             OfferInfo memory originOfferInfo = offerInfoMap[originOffer];
 
             if (_collateralRate != originOfferInfo.collateralRate) {
-                revert InvalidCollateralRate();
+                revert InvalidCollateralRate(); //Why are we reverting here?
             }
             originOfferInfo.abortOfferStatus = AbortOfferStatus.SubOfferListed;
+            //q- when settle type is turbo, we say that the original offter now how a sub offer listed.
         }
 
         /// @dev transfer collateral when offer settle type is protected
         if (makerInfo.offerSettleType == OfferSettleType.Protected) {
+            //q- why are we not updating the abort offer status here?
+
             uint256 transferAmount = OfferLibraries.getDepositAmount(
                 offerInfo.offerType,
                 offerInfo.collateralRate,
@@ -367,10 +372,13 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
         }
 
         /// @dev update offer info
+        //q-doesn't this just revert since we're reusing the same offer Id.
+        //a- The reason this doesn't revert is because we're checking agains the offerInfoMap,
+        //we only populate the stockInfoMap when we create a taker.
         offerInfoMap[offerAddr] = OfferInfo({
             id: stockInfo.id,
             authority: _msgSender(),
-            maker: offerInfo.maker,
+            maker: offerInfo.maker, //q- Should this not be msg.sender?
             offerStatus: OfferStatus.Virgin,
             offerType: offerInfo.offerType,
             abortOfferStatus: AbortOfferStatus.Initialized,
@@ -434,6 +442,8 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
          * @dev update refund token from capital pool to balance
          * @dev offer settle type is protected or original offer
          */
+        //q- so we don't refund when turbo mode becuase users don't deposit collateral
+         //except for the original offer who has to have collaretal for all trades
         if (
             makerInfo.offerSettleType == OfferSettleType.Protected ||
             stockInfo.preOffer == address(0x0)
@@ -521,6 +531,7 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
         }
 
         /// @dev update offer status to virgin
+        //@audit- An offer that is being relisted may still have used points, we should not be setting the status back to virgin.
         offerInfo.offerStatus = OfferStatus.Virgin;
         emit RelistOffer(_offer, _msgSender());
     }
@@ -565,6 +576,8 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
 
         MakerInfo storage makerInfo = makerInfoMap[offerInfo.maker];
 
+        //for turbo offers it must be the original offer
+        //for protected offers its fine.
         if (
             makerInfo.offerSettleType == OfferSettleType.Turbo &&
             stockInfo.preOffer != address(0x0)
@@ -585,6 +598,8 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
         if (offerInfo.offerStatus == OfferStatus.Virgin) {
             remainingAmount = offerInfo.amount;
         } else {
+            //@audit - This calculation is incorrect.
+            //It should be remainingAmount = offerInfo.amount - offerInfo.amount.mulDiv(offerInfo.usedPoints, offerInfo.points, Math.Rounding.Floor);
             remainingAmount = offerInfo.amount.mulDiv(
                 offerInfo.usedPoints,
                 offerInfo.points,
@@ -855,6 +870,15 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
              * @dev authority referral bonus = platform fee * authority rate
              * @dev emit ReferralBonus
              */
+
+
+             //ok so the referrer referral bonus how much we get froms someone else's trade
+
+            //The authority referral bonus is how much of our own bonus we decide to refund to the person we referred.
+
+            //The referral bonus is 30% of the platform fee. We can to allocate a certain amount of this bonus to the referrer and the rest to the authority.
+
+            //q- Theres no check our referrerRate or authority rate doesn't exceed the base referral rate.
             uint256 referrerReferralBonus = platformFee.mulDiv(
                 referralInfo.referrerRate,
                 Constants.REFERRAL_RATE_DECIMAL_SCALER,
