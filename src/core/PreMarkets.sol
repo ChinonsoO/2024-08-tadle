@@ -24,6 +24,8 @@ import {Errors} from "../utils/Errors.sol";
  * @title PreMarkets
  * @notice Implement the pre market
  */
+
+//e- Good general explanation of protocol: https://chatgpt.com/share/67dd7c44-3294-800d-971a-942d263faeb4
 contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
     using Math for uint256;
     using RelatedContractLibraries for ITadleFactory;
@@ -102,6 +104,8 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
         }
 
         /// @dev update maker info
+
+        //q-We're rewriting maker info each time?
         makerInfoMap[makerAddr] = MakerInfo({
             offerSettleType: params.offerSettleType,
             authority: _msgSender(),
@@ -311,6 +315,7 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
             revert Errors.Unauthorized();
         }
 
+        //q- We don't check if this is zero what is the impact?
         OfferInfo storage offerInfo = offerInfoMap[stockInfo.preOffer];
         MakerInfo storage makerInfo = makerInfoMap[offerInfo.maker];
 
@@ -606,7 +611,14 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
                 Math.Rounding.Floor
             );
         }
+        
+        //Returns our amount that we transfered(due to our collateral rate). Ex. if our collateral rate was 1.2 and our
+        //remaining amount is 450 we can multiply our collateral * remaining amount to find out how much of what we transferred.
 
+        //The below calculations were tested with a supposed remainingAmount of 450, usedPoints of 100, totalPoints of 1000,
+        //amount of 500.
+
+        //Correct Calculation 450 * 1.2 = 600
         uint256 transferAmount = OfferLibraries.getDepositAmount(
             offerInfo.offerType,
             offerInfo.collateralRate,
@@ -614,11 +626,17 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
             true,
             Math.Rounding.Floor
         );
+        //Correct calculation
+
+        //500 * 100 / 1000 = 50
         uint256 totalUsedAmount = offerInfo.amount.mulDiv(
             offerInfo.usedPoints,
             offerInfo.points,
             Math.Rounding.Ceil
         );
+        
+        //assuming a collaterall rate of 1.2 this gives us 50 * 1.2 = 60 
+        //correct calcuation.
         uint256 totalDepositAmount = OfferLibraries.getDepositAmount(
             offerInfo.offerType,
             offerInfo.collateralRate,
@@ -629,6 +647,9 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
 
         ///@dev update refund amount for offer authority
         uint256 makerRefundAmount;
+
+        //600 - 60 = 540, This is correct -> 450 * 1.2 = 540, if our original amount was 500 its means our collateralized total was 
+        //500 * 1.2 = 600. Doing 600 - 60 gives us 540 which is how much we expect to get back as a refund.
         if (transferAmount > totalDepositAmount) {
             makerRefundAmount = transferAmount - totalDepositAmount;
         } else {
@@ -643,6 +664,7 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
             makerRefundAmount
         );
 
+        //q- What can the aborted Status lead into.
         offerInfo.abortOfferStatus = AbortOfferStatus.Aborted;
         offerInfo.offerStatus = OfferStatus.Settled;
 
@@ -665,6 +687,7 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
             revert Errors.Unauthorized();
         }
 
+        //q- why is this different from above?
         if (stockInfo.preOffer != _offer) {
             revert InvalidOfferAccount(stockInfo.preOffer, _offer);
         }
@@ -683,6 +706,13 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
             );
         }
 
+        //Using our previous example, I how have stock worth 100 points.
+        //My deposit amount is 100 * 1000 / 500 = 200, this doesn't seem like it makes sense
+
+        //Our deposit amount should be 500 * 100 /1000 which is 50. If there are a total of 1000 points with amount 500
+        //and we bought 100 points (1/10) we should have paid 50 for it.
+        
+        //@audit incorrect calculation.
         uint256 depositAmount = stockInfo.points.mulDiv(
             preOfferInfo.points,
             preOfferInfo.amount,
@@ -787,6 +817,7 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
 
         stockInfo.stockStatus = StockStatus.Finished;
 
+        //@audit- No Update to stock.points here
         emit SettledBidTaker(
             _offer,
             _stock,
@@ -958,14 +989,14 @@ contract PreMarktes is PerMarketsStorage, Rescuable, Related, IPerMarkets {
         if (offerInfo.offerType == OfferType.Ask) {
             tokenManager.addTokenBalance(
                 TokenBalanceType.SalesRevenue,
-                offerInfo.authority,
+                offerInfo.authority, //Update revenue of who bought the stock
                 makerInfo.tokenAddress,
                 _depositAmount
             );
         } else {
             tokenManager.addTokenBalance(
                 TokenBalanceType.SalesRevenue,
-                _msgSender(),
+                _msgSender(), //Update revenue of this contract
                 makerInfo.tokenAddress,
                 _depositAmount
             );

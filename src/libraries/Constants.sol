@@ -10,10 +10,11 @@ library Constants {
     /// @dev Platform fee decimal scaler
     uint256 internal constant PLATFORM_FEE_DECIMAL_SCALER = 1_000_000;
 
-    /// @dev Each trade tax decimal scaler
+    /// @dev Each trade tax decimal scaler, 10_000 = 100%
     uint256 internal constant EACH_TRADE_TAX_DECIMAL_SCALER = 10_000;
 
     /// @dev Collateral rate decimal scaler
+    //So this means 10_000 = 100%
     uint256 internal constant COLLATERAL_RATE_DECIMAL_SCALER = 10_000;
 
     /// @dev Each trade tax maxinum

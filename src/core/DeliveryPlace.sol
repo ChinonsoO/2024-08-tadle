@@ -32,6 +32,9 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
      * @dev offer status must be Settling
      * @dev refund amount = offer amount - used amount
      */
+
+    //We created an offer to buy points and now we want to close it.
+    //This should really be renamed to settleBidOffer
     function closeBidOffer(address _offer) external {
         (
             OfferInfo memory offerInfo,
@@ -55,6 +58,8 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
             revert InvaildMarketPlaceStatus();
         }
 
+        //@audit - This shouldn't exists it prevents partial refunds,
+        //that the blow code seems to be ok with.
         if (offerInfo.offerStatus != OfferStatus.Virgin) {
             revert InvalidOfferStatus();
         }
@@ -78,6 +83,8 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
         IPerMarkets perMarkets = tadleFactory.getPerMarkets();
         perMarkets.updateOfferStatus(_offer, OfferStatus.Settled);
 
+        //@audit- where is the settledBidOffer function?
+
         emit CloseBidOffer(
             makerInfo.marketPlace,
             offerInfo.maker,
@@ -93,6 +100,12 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
      * @dev offer status must be Settled
      * @param _stock stock address
      */
+
+     //So I think the idea of this function is that not all points were settled
+     //at TGE, so now the bidder is looking to claim back some of his cash using the makers
+     //collateral. We need the makers collateral, how many points of the bidder were settled, and total
+     //points
+
     function closeBidTaker(address _stock) external {
         IPerMarkets perMarkets = tadleFactory.getPerMarkets();
         ITokenManager tokenManager = tadleFactory.getTokenManager();
@@ -102,6 +115,8 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
             revert InvalidStock();
         }
 
+        //So our stockType is bid, meaning we bought some offer or created an offer.
+        //A stocktype of bid represents a buyers position.
         if (stockInfo.stockType == StockType.Ask) {
             revert InvalidStockType();
         }
@@ -124,12 +139,28 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
             userRemainingPoints = stockInfo.points;
         } else {
             offerInfo = perMarkets.getOfferInfo(makerInfo.originOffer);
+            //we haven't tried to sell the stock we bought
             if (stockInfo.offer == address(0x0)) {
                 userRemainingPoints = stockInfo.points;
             } else {
+                //we decided to list the stock we bought
                 OfferInfo memory listOfferInfo = perMarkets.getOfferInfo(
                     stockInfo.offer
                 );
+                //@audit this is wrong.
+                //Suppose Alice is our original maker who has a sell offer for 1000 points
+                //Suppose Bob buys 500 points from Alice
+                //Bob then goes to list 300 of the 500 points he bought from alice (listOffer.points = 300)
+                //suppose cathy buys 100 of bobs points, so now bobs points is 300 and usedPoints is 100
+                //(listOffer.points = 300, listOffer.usedPoints = 100)
+                //The below says bobs remaningPoints is 
+                //listOffer.points - usedPoints = 300 - 100 = 200, BUT bob still has 200 unlisted points.
+                //so 200 of bobs points are not taken into account.
+                //https://chatgpt.com/share/67dd7114-adfc-800d-85ff-06540f491955
+                //(1/7)     
+
+                //This should be something like stock.points - listOfferInfo.usedPoints
+
                 userRemainingPoints =
                     listOfferInfo.points -
                     listOfferInfo.usedPoints;
@@ -149,7 +180,11 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
         }
 
         uint256 collateralFee;
+
+        //q- This is saying that of our used points not all of them were settled at TGE.
         if (offerInfo.usedPoints > offerInfo.settledPoints) {
+            //q wait what wer revert when offerStatus is not settled so this branch
+            //will never be reached.
             if (offerInfo.offerStatus == OfferStatus.Virgin) {
                 collateralFee = OfferLibraries.getDepositAmount(
                     offerInfo.offerType,
@@ -159,14 +194,21 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
                     Math.Rounding.Floor
                 );
             } else {
+                //1st case
+                //lets say that amount is $500 and used points is 100 and total points is 1000
+
+                //2nd case (2 people bid, and someone already bid 100 points, and now a new person is bidding 100)
+                //amount is $500 usedPoints is 200 and totalAmount is 1000, usedAmount = 100 
                 uint256 usedAmount = offerInfo.amount.mulDiv(
                     offerInfo.usedPoints,
                     offerInfo.points,
                     Math.Rounding.Floor
                 );
+                //fee == usdeAmount * CollaterateRate = 50 * 1.2 = 60
 
+                //case 2, fee == 100 * 1.2 = 120
                 collateralFee = OfferLibraries.getDepositAmount(
-                    offerInfo.offerType,
+                    offerInfo.offerType, //Ask
                     offerInfo.collateralRate,
                     usedAmount,
                     true,
@@ -174,6 +216,15 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
                 );
             }
         }
+
+        //first case
+        //60 * 100 / 100 = 60
+        //THis makes sense, with an amount of 500 and a collateral rate of 1.2
+        //the user must have deposited $600 worth of funds. If we have 1000 points,
+        //and a user buys 100 of those points they should be entitled to 10% of our collateral.
+        //which is 60. For the cases in which only 1 person buys points this makes sense lets test 2.
+
+        //2nd case (2 deposits), userCOllateral = 120 * 100/200 = 60, still good.
 
         uint256 userCollateralFee = collateralFee.mulDiv(
             userRemainingPoints,
@@ -187,6 +238,9 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
             makerInfo.tokenAddress,
             userCollateralFee
         );
+        
+
+        //q- Not sure about this
         uint256 pointTokenAmount = offerInfo.settledPointTokenAmount.mulDiv(
             userRemainingPoints,
             offerInfo.usedPoints,
@@ -199,8 +253,10 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
             pointTokenAmount
         );
 
+        //stock brought into finished cuz we've claimed collateral
         perMarkets.updateStockStatus(_stock, StockStatus.Finished);
 
+        //@audit- we don't close any potential open offers
         emit CloseBidTaker(
             makerInfo.marketPlace,
             offerInfo.maker,
@@ -219,6 +275,8 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
      * @param _offer offer address
      * @param _settledPoints settled points
      */
+
+    //We deposited collateral to sell, now depending on how many points we settle we recieve our collateral back
     function settleAskMaker(address _offer, uint256 _settledPoints) external {
         (
             OfferInfo memory offerInfo,
@@ -231,10 +289,13 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
             revert InvalidPoints();
         }
 
+        //@audit- No check for settledPoints == offer.settledPoints
+
         if (marketPlaceInfo.fixedratio) {
             revert FixedRatioUnsupported();
         }
 
+        //This function is for if we have a sell offer.
         if (offerInfo.offerType == OfferType.Bid) {
             revert InvalidOfferType(OfferType.Ask, OfferType.Bid);
         }
@@ -264,6 +325,16 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
 
         ITokenManager tokenManager = tadleFactory.getTokenManager();
         if (settledPointTokenAmount > 0) {
+            //q- Why are we not passing in msg.value here?
+            //q- Why are we still sending money to the capitalPool if we're settling
+            //ask Maker
+            //a- Ok so each offer has points and we are seelling those points. Once we've settled these points
+            //the settledPoints on our offer is udpated, this is sending the money from those settledPoints
+
+            //q- New questiosn then, why are we not just getting the settledPoints from the offer?
+
+            //a- The maker decides how much they want to settle then send that amount to the capital pool,
+            //the rest is collateral for others to claim.
             tokenManager.tillIn(
                 _msgSender(),
                 marketPlaceInfo.tokenAddress,
@@ -273,8 +344,11 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
         }
 
         uint256 makerRefundAmount;
+        //@audit- PartialSettlements don't work, because we only check if 
+        //settledPoints == offerInfo.usedPoints
         if (_settledPoints == offerInfo.usedPoints) {
             if (offerInfo.offerStatus == OfferStatus.Virgin) {
+                //Set Refund to our collateral if we had no buyers
                 makerRefundAmount = OfferLibraries.getDepositAmount(
                     offerInfo.offerType,
                     offerInfo.collateralRate,
@@ -283,12 +357,15 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
                     Math.Rounding.Floor
                 );
             } else {
+                //500 * 100/1000 = 50
                 uint256 usedAmount = offerInfo.amount.mulDiv(
                     offerInfo.usedPoints,
                     offerInfo.points,
                     Math.Rounding.Floor
                 );
+                //50 * 1.2 = 60
 
+                //so we refund based on the amount we setteld.
                 makerRefundAmount = OfferLibraries.getDepositAmount(
                     offerInfo.offerType,
                     offerInfo.collateralRate,
@@ -299,7 +376,7 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
             }
 
             tokenManager.addTokenBalance(
-                TokenBalanceType.SalesRevenue,
+                TokenBalanceType.SalesRevenue, //@audit- TokenBalanceType should be makerRefund
                 _msgSender(),
                 makerInfo.tokenAddress,
                 makerRefundAmount
@@ -317,7 +394,7 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
             makerInfo.marketPlace,
             offerInfo.maker,
             _offer,
-            _msgSender(),
+            _msgSender(), //@audit- In cases where owner sends this authority is not msgSender
             _settledPoints,
             settledPointTokenAmount,
             makerRefundAmount
@@ -332,6 +409,8 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
      * @param _settledPoints settled points
      * @notice _settledPoints must be less than or equal to stock points
      */
+
+     //a stock that we sold, and now we're looking to settle it, and pay the people who bought it.
     function settleAskTaker(address _stock, uint256 _settledPoints) external {
         IPerMarkets perMarkets = tadleFactory.getPerMarkets();
         StockInfo memory stockInfo = perMarkets.getStockInfo(_stock);
@@ -341,7 +420,8 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
             MakerInfo memory makerInfo,
             MarketPlaceInfo memory marketPlaceInfo,
             MarketPlaceStatus status
-        ) = getOfferInfo(stockInfo.preOffer);
+        ) = getOfferInfo(stockInfo.preOffer); //@audit - No differentiation between turboMode and protectedMode
+        //For turbo mode the offerInfor we get should be makerInfo.originOffer
 
         if (stockInfo.stockStatus != StockStatus.Initialized) {
             revert InvalidStockStatus();
@@ -350,6 +430,7 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
         if (marketPlaceInfo.fixedratio) {
             revert FixedRatioUnsupported();
         }
+        //This function deals with a stockType of Ask, so a sellers position.
         if (stockInfo.stockType == StockType.Bid) {
             revert InvalidStockType();
         }
@@ -374,8 +455,9 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
             _settledPoints;
         ITokenManager tokenManager = tadleFactory.getTokenManager();
         if (settledPointTokenAmount > 0) {
+            //transfer from msg.sender to capital pool, makese sense
             tokenManager.tillIn(
-                _msgSender(),
+                _msgSender(), //offerInfo.authority or Owner()
                 marketPlaceInfo.tokenAddress,
                 settledPointTokenAmount,
                 true
@@ -383,28 +465,38 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
 
             tokenManager.addTokenBalance(
                 TokenBalanceType.PointToken,
-                offerInfo.authority,
+                offerInfo.authority, //@audit this should be stockInfo.authority
                 makerInfo.tokenAddress,
                 settledPointTokenAmount
             );
         }
 
         uint256 collateralFee = OfferLibraries.getDepositAmount(
-            offerInfo.offerType,
+            offerInfo.offerType, //Bid, (person who bought our stock)
             offerInfo.collateralRate,
-            stockInfo.amount,
+            stockInfo.amount, //how much the other person was looking to buy
             false,
             Math.Rounding.Floor
         );
-
+        
+        //If we settled all their points, we return our collateral
         if (_settledPoints == stockInfo.points) {
             tokenManager.addTokenBalance(
                 TokenBalanceType.RemainingCash,
-                _msgSender(),
+                _msgSender(), //offerInfo.authority / owner()
                 makerInfo.tokenAddress,
                 collateralFee
             );
         } else {
+           //If we don't settle all the users points, we still refund ourselves our whole collateral?
+
+           //wait the dev of this is either saying that we forfeit our collateral if we don't settle all the users points
+           //or this is saying we should refund a portion of our collateral if we don't full settle all the users points.
+
+           //I'm leaning towards the idea that its saying we should refund a portion of our collateral if we don't full settle all the users points.
+
+           //@audit this should not refund us the entire collateral FEE instead it should refund us a portion of the collateralFee based
+           //on how much we settle.
             tokenManager.addTokenBalance(
                 TokenBalanceType.MakerRefund,
                 offerInfo.authority,
@@ -425,7 +517,7 @@ contract DeliveryPlace is DeliveryPlaceStorage, Rescuable, IDeliveryPlace {
             offerInfo.maker,
             _stock,
             stockInfo.preOffer,
-            _msgSender(),
+            _msgSender(), //@audit - In cases where msgSender is owner() this should be stock.Authority
             _settledPoints,
             settledPointTokenAmount,
             collateralFee
